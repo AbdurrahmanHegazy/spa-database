@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="IndustrialMonitoring.Api/IndustrialMonitoring.Api.csproj" />
+  <Project Path="IndustrialMonitoring.Collector/IndustrialMonitoring.Collector.csproj" />
+  <Project Path="IndustrialMonitoring.Shared/IndustrialMonitoring.Shared.csproj" />
+  <Project Path="IndustrialMonitoring.StorageConsumer/IndustrialMonitoring.StorageConsumer.csproj" />
+</Solution>

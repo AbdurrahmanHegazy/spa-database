@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="../IndustrialMonitoring.Api/IndustrialMonitoring.Api.csproj" Id="055f4e91-7ee6-4219-800f-dbfd9687c186" />
+  <Project Path="../IndustrialMonitoring.Shared/IndustrialMonitoring.Shared.csproj" Id="91bbb0e6-d566-4fd5-ab4c-716ba2542d6f" />
+  <Project Path="../IndustrialMonitoring.StorageConsumer/IndustrialMonitoring.StorageConsumer.csproj" Id="8815f48b-b96f-4a7f-bfe1-a646e6043720" />
+  <Project Path="IndustrialMonitoring.Collector.csproj" />
+</Solution>
