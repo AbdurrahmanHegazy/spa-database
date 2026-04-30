@@ -1,67 +1,180 @@
-﻿using IndustrialMonitoring.Api.Models.Trends;
+﻿using System.Globalization;
+using IndustrialMonitoring.Api.Models.Trends;
+using Microsoft.Extensions.Configuration;
+using Npgsql;
 
 namespace IndustrialMonitoring.Api.Services;
 
 public class TrendsService : ITrendsService
 {
+    private readonly string _connectionString;
+
+    public TrendsService(IConfiguration configuration)
+    {
+        _connectionString =
+            configuration.GetConnectionString("Postgres")
+            ?? throw new InvalidOperationException("ConnectionStrings:Postgres is missing.");
+    }
+    private static string NormalizeTagId(string? tagId)
+    {
+        const string defaultTag = "ns=3;s=\"Sensori analogici\".\"IM_valore_CH4_sp1\".\"valore attuale\"";
+
+        if (string.IsNullOrWhiteSpace(tagId))
+        {
+            return defaultTag;
+        }
+
+        if (tagId.StartsWith("ns=", StringComparison.OrdinalIgnoreCase))
+        {
+            return tagId;
+        }
+
+        var cleaned = tagId.Trim();
+
+        if (cleaned.Equals("IM_valore_CH4_sp1.valore attuale", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("IM_valore_CH4_sp1 - valore attuale", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ns=3;s=\"Sensori analogici\".\"IM_valore_CH4_sp1\".\"valore attuale\"";
+        }
+
+        if (cleaned.Equals("IM_valore_CH4_sp1.stato attuale", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("IM_valore_CH4_sp1 - stato attuale", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ns=3;s=\"Sensori analogici\".\"IM_valore_CH4_sp1\".\"stato attuale\"";
+        }
+
+        return cleaned;
+    }
+
     public TrendsResponse GetTrendsData(string? tagId, string? from, string? to, string? timeRange)
     {
-        var selectedTag = string.IsNullOrWhiteSpace(tagId)
-            ? "Motori_BM_Pompa_i_M030.frequenza attuale"
-            : tagId;
+        var selectedTag = NormalizeTagId(tagId);
 
-        var selectedFrom = string.IsNullOrWhiteSpace(from)
-            ? "2026-04-15 10:00"
-            : from;
+        var (resolvedFrom, resolvedTo, resolvedTimeRange) = ResolveTimeWindow(from, to, timeRange);
 
-        var selectedTo = string.IsNullOrWhiteSpace(to)
-            ? "2026-04-15 11:00"
-            : to;
+        var rows = LoadTrendRows(selectedTag, resolvedFrom, resolvedTo);
 
-        var selectedTimeRange = string.IsNullOrWhiteSpace(timeRange)
-            ? "Last 1 Hour"
-            : timeRange;
+        var numericRows = rows
+            .Where(x => x.NumericValue.HasValue)
+            .ToList();
+
+        var min = numericRows.Count > 0 ? numericRows.Min(x => x.NumericValue!.Value) : 0;
+        var max = numericRows.Count > 0 ? numericRows.Max(x => x.NumericValue!.Value) : 0;
+        var avg = numericRows.Count > 0 ? numericRows.Average(x => x.NumericValue!.Value) : 0;
 
         return new TrendsResponse
         {
             Filters = new TrendFiltersDto
             {
                 SelectedTag = selectedTag,
-                TimeRange = selectedTimeRange,
-                From = selectedFrom,
-                To = selectedTo
+                TimeRange = resolvedTimeRange,
+                From = resolvedFrom.ToString("yyyy-MM-dd HH:mm"),
+                To = resolvedTo.ToString("yyyy-MM-dd HH:mm")
             },
             Stats = new List<TrendStatItemDto>
             {
-                new() { Title = "Minimum", Value = "118.20", Subtitle = "Hz" },
-                new() { Title = "Maximum", Value = "126.90", Subtitle = "Hz" },
-                new() { Title = "Average", Value = "123.45", Subtitle = "Hz" },
-                new() { Title = "Samples", Value = "1,248", Subtitle = "points" }
+                new() { Title = "Minimum", Value = min.ToString("0.##", CultureInfo.InvariantCulture), Subtitle = "value" },
+                new() { Title = "Maximum", Value = max.ToString("0.##", CultureInfo.InvariantCulture), Subtitle = "value" },
+                new() { Title = "Average", Value = avg.ToString("0.##", CultureInfo.InvariantCulture), Subtitle = "value" },
+                new() { Title = "Samples", Value = numericRows.Count.ToString("N0", CultureInfo.InvariantCulture), Subtitle = "points" }
             },
-            SampleRows = new List<TrendSampleRowDto>
-            {
-                new() { Time = "10:00", Value = "122.80 Hz" },
-                new() { Time = "10:15", Value = "123.10 Hz" },
-                new() { Time = "10:30", Value = "124.00 Hz" },
-                new() { Time = "10:45", Value = "123.60 Hz" },
-                new() { Time = "11:00", Value = "123.45 Hz" }
-            },
-            ChartPoints = new List<TrendPointDto>
-            {
-                new() { Time = "10:00", Value = 122.80 },
-                new() { Time = "10:05", Value = 123.00 },
-                new() { Time = "10:10", Value = 123.40 },
-                new() { Time = "10:15", Value = 123.10 },
-                new() { Time = "10:20", Value = 124.20 },
-                new() { Time = "10:25", Value = 125.10 },
-                new() { Time = "10:30", Value = 124.00 },
-                new() { Time = "10:35", Value = 123.70 },
-                new() { Time = "10:40", Value = 123.30 },
-                new() { Time = "10:45", Value = 123.60 },
-                new() { Time = "10:50", Value = 122.90 },
-                new() { Time = "10:55", Value = 123.20 },
-                new() { Time = "11:00", Value = 123.45 }
-            }
+            SampleRows = numericRows
+                .TakeLast(10)
+                .Select(x => new TrendSampleRowDto
+                {
+                    Time = x.Timestamp.ToLocalTime().ToString("HH:mm"),
+                    Value = x.NumericValue!.Value.ToString("0.##", CultureInfo.InvariantCulture)
+                })
+                .ToList(),
+            ChartPoints = numericRows
+                .Select(x => new TrendPointDto
+                {
+                    Time = x.Timestamp.ToLocalTime().ToString("HH:mm"),
+                    Value = x.NumericValue!.Value
+                })
+                .ToList()
         };
+    }
+
+    private List<TrendRow> LoadTrendRows(string tagName, DateTime fromUtc, DateTime toUtc)
+    {
+        var results = new List<TrendRow>();
+
+        using var connection = new NpgsqlConnection(_connectionString);
+        connection.Open();
+
+        const string sql = """
+            SELECT tag_name, value, "timestamp", quality, source
+            FROM public.tag_readings
+            WHERE tag_name = @tagName
+              AND "timestamp" >= @fromUtc
+              AND "timestamp" <= @toUtc
+            ORDER BY "timestamp" ASC
+            """;
+
+        using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("tagName", tagName);
+        command.Parameters.AddWithValue("fromUtc", fromUtc);
+        command.Parameters.AddWithValue("toUtc", toUtc);
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var rawValue = reader["value"]?.ToString() ?? string.Empty;
+
+            double? numericValue = null;
+            if (double.TryParse(rawValue, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+            {
+                numericValue = parsed;
+            }
+
+            results.Add(new TrendRow
+            {
+                TagName = reader["tag_name"]?.ToString() ?? string.Empty,
+                RawValue = rawValue,
+                NumericValue = numericValue,
+                Timestamp = reader.GetDateTime(reader.GetOrdinal("timestamp")),
+                Quality = reader["quality"]?.ToString() ?? string.Empty,
+                Source = reader["source"]?.ToString() ?? string.Empty
+            });
+        }
+
+        return results;
+    }
+
+    private static (DateTime fromUtc, DateTime toUtc, string resolvedTimeRange) ResolveTimeWindow(
+        string? from,
+        string? to,
+        string? timeRange)
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        if (DateTime.TryParse(from, out var parsedFrom) && DateTime.TryParse(to, out var parsedTo))
+        {
+            return (
+                DateTime.SpecifyKind(parsedFrom, DateTimeKind.Local).ToUniversalTime(),
+                DateTime.SpecifyKind(parsedTo, DateTimeKind.Local).ToUniversalTime(),
+                string.IsNullOrWhiteSpace(timeRange) ? "custom" : timeRange
+            );
+        }
+
+        return (timeRange ?? "last-1h") switch
+        {
+            "last-15m" => (nowUtc.AddMinutes(-15), nowUtc, "last-15m"),
+            "last-6h" => (nowUtc.AddHours(-6), nowUtc, "last-6h"),
+            "last-24h" => (nowUtc.AddHours(-24), nowUtc, "last-24h"),
+            "custom" => (nowUtc.AddHours(-1), nowUtc, "custom"),
+            _ => (nowUtc.AddHours(-1), nowUtc, "last-1h")
+        };
+    }
+
+    private class TrendRow
+    {
+        public string TagName { get; set; } = string.Empty;
+        public string RawValue { get; set; } = string.Empty;
+        public double? NumericValue { get; set; }
+        public DateTime Timestamp { get; set; }
+        public string Quality { get; set; } = string.Empty;
+        public string Source { get; set; } = string.Empty;
     }
 }

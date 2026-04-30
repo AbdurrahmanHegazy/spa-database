@@ -1,4 +1,5 @@
 using IndustrialMonitoring.Api.Services;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,7 +10,7 @@ builder.Services.AddSwaggerGen();
 
 // Temporary test service registration
 builder.Services.AddScoped<IDashboardService, DashboardService>();
-builder.Services.AddScoped<IMonitoringService, MonitoringService>();
+builder.Services.AddScoped<IMonitoringService, MonitoringService>(); 
 builder.Services.AddScoped<ITagDetailsService, TagDetailsService>();
 builder.Services.AddScoped<IAlertsService, AlertsService>();
 builder.Services.AddScoped<ITrendsService, TrendsService>();
@@ -24,6 +25,11 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
+});
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+    var connectionString = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
+    return ConnectionMultiplexer.Connect(connectionString);
 });
 
 var app = builder.Build();
