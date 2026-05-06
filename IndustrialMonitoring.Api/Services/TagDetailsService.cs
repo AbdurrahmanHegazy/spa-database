@@ -4,6 +4,7 @@ using IndustrialMonitoring.Api.Models.Tags;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
 using StackExchange.Redis;
+using IndustrialMonitoring.Api.Helpers;
 
 namespace IndustrialMonitoring.Api.Services;
 
@@ -32,16 +33,18 @@ public class TagDetailsService : ITagDetailsService
 
         var displayName = FormatTagDisplayName(resolvedTagName);
         var groupName = ExtractGroupName(resolvedTagName);
-        var freshness = latestReading is null ? "--" : FormatFreshness(latestReading.Timestamp);
+        var latestUtcTimestamp = ParseStoredUtcTimestamp(latestReading?.Timestamp);
+        var freshness = latestUtcTimestamp is null ? "--" : FormatFreshness(latestUtcTimestamp.Value);
         var currentValue = latestReading?.Value ?? "--";
         var quality = latestReading?.Quality ?? "Unknown";
         var source = latestReading?.Source ?? "Unavailable";
-        var lastUpdate = latestReading is null
+        var lastUpdate = latestUtcTimestamp is null
             ? "--"
-            : latestReading.Timestamp.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
+            : TimeZoneHelper.UtcToRome(latestUtcTimestamp.Value).ToString("dd/MM/yyyy HH:mm:ss");
 
         return new TagDetailsResponse
         {
+            RawTagName = resolvedTagName,
             RouteParam = tagId,
 
             Summary = new TagSummaryDto
@@ -51,7 +54,7 @@ public class TagDetailsService : ITagDetailsService
                 Quality = quality,
                 LastUpdate = lastUpdate,
                 Freshness = freshness,
-                DeviceState = GetDeviceState(latestReading)
+                DeviceState = GetDeviceState(latestReading, latestUtcTimestamp)
             },
 
             Metadata = new List<TagMetadataItemDto>
@@ -260,9 +263,9 @@ public class TagDetailsService : ITagDetailsService
         return $"{Math.Max(1, (int)age.TotalHours)}h ago";
     }
 
-    private static string GetDeviceState(TagRedisReading? reading)
+    private static string GetDeviceState(TagRedisReading? reading, DateTime? utcTimestamp)
     {
-        if (reading is null)
+        if (reading is null || utcTimestamp is null)
         {
             return "Unknown";
         }
@@ -272,7 +275,7 @@ public class TagDetailsService : ITagDetailsService
             return "Warning";
         }
 
-        var age = DateTime.UtcNow - reading.Timestamp.ToUniversalTime();
+        var age = DateTime.UtcNow - utcTimestamp.Value;
         if (age.TotalSeconds > 30)
         {
             return "Offline";
@@ -290,12 +293,29 @@ public class TagDetailsService : ITagDetailsService
 
         return "Unknown";
     }
+    private static DateTime? ParseStoredUtcTimestamp(string? timestampText)
+    {
+        if (string.IsNullOrWhiteSpace(timestampText))
+        {
+            return null;
+        }
 
+        if (DateTime.TryParse(
+            timestampText,
+            null,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
+            out var parsed))
+        {
+            return DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+        }
+
+        return null;
+    }
     private class TagRedisReading
     {
         public string TagName { get; set; } = string.Empty;
         public string Value { get; set; } = string.Empty;
-        public DateTime Timestamp { get; set; }
+        public string Timestamp { get; set; } = string.Empty;
         public string Quality { get; set; } = string.Empty;
         public string Source { get; set; } = string.Empty;
     }

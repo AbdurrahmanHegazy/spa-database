@@ -2,6 +2,7 @@
 
 public class TagDetailsResponse
 {
+    public string RawTagName { get; set; } = string.Empty;
     public string RouteParam { get; set; } = string.Empty;
     public TagSummaryDto Summary { get; set; } = new();
     public List<TagMetadataItemDto> Metadata { get; set; } = new();

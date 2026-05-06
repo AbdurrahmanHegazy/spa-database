@@ -92,10 +92,18 @@ function TagDetailsPage() {
             flexWrap: "wrap",
           }}
         >
-          <Link to="/monitoring" className="primary-button" style={{ textDecoration: "none" }}>
-            Back to Monitoring
-          </Link>
-
+        <Link
+    to="/monitoring"
+    className="primary-button"
+    style={{
+        textDecoration: "none",
+        display: "inline-flex", 
+        alignItems: "center",
+        justifyContent: "center",
+    }}
+>
+    Back to Monitoring
+</Link>
           {selectedTag?.metadata?.find((x) => x.label === "Redis Key")?.value ? (
             <span
               style={{
@@ -152,12 +160,12 @@ function TagDetailsPage() {
 
           <div style={{ marginTop: "16px" }}>
             <Link
-              to="/trends"
-              className="primary-button"
-              style={{ textDecoration: "none", display: "inline-block" }}
-            >
-              Open Trends
-            </Link>
+  to={`/trends?tagId=${encodeURIComponent(selectedTag?.metadata?.find((x) => x.label === "Tag Name")?.value ?? "")}`}
+  className="primary-button"
+  style={{ textDecoration: "none", display: "inline-block" }}
+>
+  Open Trends
+</Link>
           </div>
         </SectionCard>
       </div>

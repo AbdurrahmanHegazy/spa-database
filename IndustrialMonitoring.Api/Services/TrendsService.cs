@@ -2,6 +2,7 @@
 using IndustrialMonitoring.Api.Models.Trends;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
+using IndustrialMonitoring.Api.Helpers;
 
 namespace IndustrialMonitoring.Api.Services;
 
@@ -68,8 +69,8 @@ public class TrendsService : ITrendsService
             {
                 SelectedTag = selectedTag,
                 TimeRange = resolvedTimeRange,
-                From = resolvedFrom.ToString("yyyy-MM-dd HH:mm"),
-                To = resolvedTo.ToString("yyyy-MM-dd HH:mm")
+                From = TimeZoneHelper.UtcToRome(resolvedFrom).ToString("yyyy-MM-dd HH:mm"),
+                To = TimeZoneHelper.UtcToRome(resolvedTo).ToString("yyyy-MM-dd HH:mm")
             },
             Stats = new List<TrendStatItemDto>
             {
@@ -82,14 +83,14 @@ public class TrendsService : ITrendsService
                 .TakeLast(10)
                 .Select(x => new TrendSampleRowDto
                 {
-                    Time = x.Timestamp.ToLocalTime().ToString("HH:mm"),
+                    Time = TimeZoneHelper.UtcToRome(x.Timestamp).ToString("HH:mm"),
                     Value = x.NumericValue!.Value.ToString("0.##", CultureInfo.InvariantCulture)
                 })
                 .ToList(),
             ChartPoints = numericRows
                 .Select(x => new TrendPointDto
                 {
-                    Time = x.Timestamp.ToLocalTime().ToString("HH:mm"),
+                    Time = TimeZoneHelper.UtcToRome(x.Timestamp).ToString("HH:mm"),
                     Value = x.NumericValue!.Value
                 })
                 .ToList()
@@ -133,7 +134,9 @@ public class TrendsService : ITrendsService
                 TagName = reader["tag_name"]?.ToString() ?? string.Empty,
                 RawValue = rawValue,
                 NumericValue = numericValue,
-                Timestamp = reader.GetDateTime(reader.GetOrdinal("timestamp")),
+                Timestamp = DateTime.SpecifyKind(
+    reader.GetDateTime(reader.GetOrdinal("timestamp")),
+    DateTimeKind.Utc),
                 Quality = reader["quality"]?.ToString() ?? string.Empty,
                 Source = reader["source"]?.ToString() ?? string.Empty
             });

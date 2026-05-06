@@ -6,6 +6,7 @@ import TrendsPage from "../pages/TrendsPage";
 import AlertsPage from "../pages/AlertsPage";
 import TagDetailsPage from "../pages/TagDetailsPage";
 import NotFoundPage from "../pages/NotFoundPage";
+import OpcUaExplorerPage from "../pages/OpcUaExplorerPage";
 
 const appRouter = createBrowserRouter([
     {
@@ -32,12 +33,17 @@ const appRouter = createBrowserRouter([
                 path: "tags/:tagId",
                 element: <TagDetailsPage />,
             },
+            {
+                path: "opcua-explorer",
+                element: <OpcUaExplorerPage />,
+            },
         ],
     },
     {
         path: "*",
         element: <NotFoundPage />,
     },
+    
 ]);
 
 export default appRouter;

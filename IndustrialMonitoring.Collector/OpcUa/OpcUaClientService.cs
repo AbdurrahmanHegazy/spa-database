@@ -115,6 +115,73 @@ public class OpcUaClientService : IOpcUaClient
 
         return Task.CompletedTask;
     }
+    
+
+    public Task BrowseRootAsync(CancellationToken cancellationToken)
+    {
+        if (_session is null || !_session.Connected)
+        {
+            throw new InvalidOperationException("OPC UA session is not connected.");
+        }
+
+        Console.WriteLine("===== OPC UA BROWSE START =====");
+        BrowseNode(ObjectIds.ObjectsFolder, 0);
+        Console.WriteLine("===== OPC UA BROWSE END =====");
+
+        return Task.CompletedTask;
+    }
+
+    public Task<DiscoveredOpcUaSection?> DiscoverSectionAsync(string sectionNodeId, CancellationToken cancellationToken)
+    {
+        if (_session is null || !_session.Connected)
+        {
+            throw new InvalidOperationException("OPC UA session is not connected.");
+        }
+
+        var rootNodeId = NodeId.Parse(sectionNodeId);
+
+        var rootReferences = BrowseAll(rootNodeId);
+        var rootDisplayName = GetNodeDisplayName(rootNodeId);
+
+        var section = new DiscoveredOpcUaSection
+        {
+            Name = rootDisplayName,
+            DisplayName = rootDisplayName,
+            NodeId = sectionNodeId,
+            ChildCount = rootReferences.Count
+        };
+
+        foreach (var reference in rootReferences)
+        {
+            var childNodeId = ExpandedNodeId.ToNodeId(reference.NodeId, _session.NamespaceUris);
+            if (childNodeId is null)
+            {
+                continue;
+            }
+
+            var childReferences = BrowseAll(childNodeId);
+
+            var valueNode = childReferences.FirstOrDefault(x =>
+                string.Equals(x.DisplayName.Text, "valore attuale", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(x.BrowseName.Name, "valore attuale", StringComparison.OrdinalIgnoreCase));
+
+            if (valueNode is null)
+            {
+                continue;
+            }
+
+            section.Tags.Add(new DiscoveredOpcUaTag
+            {
+                TagName = reference.DisplayName.Text ?? reference.BrowseName.Name ?? "Unnamed",
+                DisplayName = reference.DisplayName.Text ?? reference.BrowseName.Name ?? "Unnamed",
+                NodeId = valueNode.NodeId.ToString(),
+                DataType = "Real"
+            });
+        }
+
+        return Task.FromResult<DiscoveredOpcUaSection?>(section);
+    }
+
     private List<ReferenceDescription> BrowseAll(NodeId nodeId)
     {
         if (_session is null || !_session.Connected)
@@ -153,18 +220,15 @@ public class OpcUaClientService : IOpcUaClient
         return results;
     }
 
-    public Task BrowseRootAsync(CancellationToken cancellationToken)
+    private string GetNodeDisplayName(NodeId nodeId)
     {
         if (_session is null || !_session.Connected)
         {
             throw new InvalidOperationException("OPC UA session is not connected.");
         }
 
-        Console.WriteLine("===== OPC UA BROWSE START =====");
-        BrowseNode(ObjectIds.ObjectsFolder, 0);
-        Console.WriteLine("===== OPC UA BROWSE END =====");
-
-        return Task.CompletedTask;
+        var node = _session.ReadNode(nodeId);
+        return node?.DisplayName?.Text ?? nodeId.ToString();
     }
 
     public async Task ConnectAsync(CancellationToken cancellationToken)

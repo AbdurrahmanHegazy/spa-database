@@ -5,6 +5,7 @@ const navItems = [
     { label: "Monitoring", path: "/monitoring" },
     { label: "Trends", path: "/trends" },
     { label: "Alerts", path: "/alerts" },
+    { label: "OPC UA Explorer", path: "/opcua-explorer" },
 ];
 
 function Sidebar() {

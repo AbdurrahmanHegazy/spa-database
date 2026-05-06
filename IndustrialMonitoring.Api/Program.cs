@@ -14,6 +14,7 @@ builder.Services.AddScoped<IMonitoringService, MonitoringService>();
 builder.Services.AddScoped<ITagDetailsService, TagDetailsService>();
 builder.Services.AddScoped<IAlertsService, AlertsService>();
 builder.Services.AddScoped<ITrendsService, TrendsService>();
+builder.Services.AddScoped<IOpcUaDiscoveryService, OpcUaDiscoveryService>();
 
 // CORS for React frontend
 builder.Services.AddCors(options =>
