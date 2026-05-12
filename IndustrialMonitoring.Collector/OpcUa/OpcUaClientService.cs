@@ -12,12 +12,225 @@ namespace IndustrialMonitoring.Collector.OpcUa;
 
 public class OpcUaClientService : IOpcUaClient
 {
+    private readonly ILogger<OpcUaClientService> _logger;
     private readonly OpcUaSettings _settings;
     private Session? _session;
 
-    public OpcUaClientService(IOptions<OpcUaSettings> options)
+
+    public async Task<DiscoveredOpcUaProject?> DiscoverProjectAsync(string rootNodeId, CancellationToken cancellationToken)
+    {
+        if (_session is null)
+        {
+            throw new InvalidOperationException("OPC UA session is not connected.");
+        }
+
+        var rootNode = ExpandedNodeId.ToNodeId(rootNodeId, _session.NamespaceUris);
+
+        if (rootNode is null)
+        {
+            _logger.LogWarning("Could not parse root node id {RootNodeId}", rootNodeId);
+            return null;
+        }
+
+        var project = new DiscoveredOpcUaProject
+        {
+            Name = "Discovered OPC UA Project",
+            EndpointUrl = _settings.EndpointUrl ?? string.Empty,
+            RootNodeId = rootNodeId
+        };
+
+        var rootDiscoveredNode = BuildDiscoveredNode(_session, rootNode, depth: 0);
+
+        await DiscoverChildrenRecursiveAsync(
+            _session,
+            rootNode,
+            rootDiscoveredNode,
+            currentDepth: 0,
+            maxDepth: 4,
+            cancellationToken);
+
+        project.Nodes.Add(rootDiscoveredNode);
+
+        return project;
+    }
+
+    private async Task DiscoverChildrenRecursiveAsync(
+    Session session,
+    NodeId parentNodeId,
+    DiscoveredOpcUaNode parentNode,
+    int currentDepth,
+    int maxDepth,
+    CancellationToken cancellationToken)
+    {
+        if (currentDepth >= maxDepth)
+        {
+            return;
+        }
+
+        var references = BrowseNode(session, parentNodeId);
+
+        foreach (var reference in references)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var childNodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
+
+            if (childNodeId is null)
+            {
+                continue;
+            }
+
+            var child = BuildDiscoveredNode(session, childNodeId, currentDepth + 1);
+            parentNode.Children.Add(child);
+
+            await DiscoverChildrenRecursiveAsync(
+                session,
+                childNodeId,
+                child,
+                currentDepth + 1,
+                maxDepth,
+                cancellationToken);
+        }
+    }
+
+    private DiscoveredOpcUaNode BuildDiscoveredNode(Session session, NodeId nodeId, int depth)
+    {
+        var displayName = nodeId.ToString();
+        string? browseName = null;
+        string? nodeClass = null;
+        string? dataType = null;
+
+        try
+        {
+            var node = session.ReadNode(nodeId);
+
+            if (node is not null)
+            {
+                displayName = node.DisplayName?.Text ?? displayName;
+                browseName = node.BrowseName?.Name;
+                nodeClass = node.NodeClass.ToString();
+
+                if (node is VariableNode variableNode && variableNode.DataType is not null)
+                {
+                    dataType = variableNode.DataType.ToString();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read node metadata for {NodeId}", nodeId);
+        }
+
+        return new DiscoveredOpcUaNode
+        {
+            NodeId = nodeId.ToString(),
+            BrowseName = browseName,
+            DisplayName = displayName,
+            NodeClass = nodeClass,
+            Depth = depth,
+            Kind = ClassifyNodeKind(displayName, browseName, nodeClass, depth),
+            DataType = dataType,
+            IsSelectable = IsSelectableNode(displayName, browseName, nodeClass, depth),
+            IsEnabled = false
+        };
+    }
+
+    private List<ReferenceDescription> BrowseNode(Session session, NodeId nodeId)
+    {
+        var results = new List<ReferenceDescription>();
+
+        session.Browse(
+            null,
+            null,
+            nodeId,
+            0u,
+            BrowseDirection.Forward,
+            ReferenceTypeIds.HierarchicalReferences,
+            true,
+            (uint)(NodeClass.Object | NodeClass.Variable),
+            out var continuationPoint,
+            out var references);
+
+        if (references is not null)
+        {
+            results.AddRange(references);
+        }
+
+        while (continuationPoint is not null && continuationPoint.Length > 0)
+        {
+            session.BrowseNext(
+                null,
+                false,
+                continuationPoint,
+                out continuationPoint,
+                out var nextReferences);
+
+            if (nextReferences is not null)
+            {
+                results.AddRange(nextReferences);
+            }
+        }
+
+        return results;
+    }
+
+
+    private string ClassifyNodeKind(string displayName, string? browseName, string? nodeClass, int depth)
+    {
+        var display = displayName.ToLowerInvariant();
+        var browse = browseName?.ToLowerInvariant() ?? string.Empty;
+
+        if (depth == 0)
+        {
+            return "project_root";
+        }
+
+        if (display.Contains("icon") || browse.Contains("icon"))
+        {
+            return "metadata";
+        }
+
+        if (depth == 1 && nodeClass?.Equals("Object", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return "section_candidate";
+        }
+
+        if (nodeClass?.Equals("Object", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return "tag_object";
+        }
+
+        if (nodeClass?.Equals("Variable", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return "tag_field";
+        }
+
+        return "unknown";
+    }
+
+    private bool IsSelectableNode(string displayName, string? browseName, string? nodeClass, int depth)
+    {
+        var display = displayName.ToLowerInvariant();
+        var browse = browseName?.ToLowerInvariant() ?? string.Empty;
+
+        if (display.Contains("icon") || browse.Contains("icon"))
+        {
+            return false;
+        }
+
+        if (depth == 1 && nodeClass?.Equals("Object", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return true;
+        }
+
+        return false;
+    }
+    public OpcUaClientService(
+    IOptions<OpcUaSettings> options,
+    ILogger<OpcUaClientService> logger)
     {
         _settings = options.Value;
+        _logger = logger;
     }
 
     private void SearchNode(NodeId nodeId, string searchText, int level = 0)

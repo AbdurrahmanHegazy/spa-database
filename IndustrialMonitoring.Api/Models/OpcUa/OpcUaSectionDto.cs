@@ -8,5 +8,5 @@ public class OpcUaSectionDto
     public string DisplayName { get; set; } = string.Empty;
     public int ChildCount { get; set; }
     public bool IsEnabled { get; set; }
-    public DateTime DiscoveredAtUtc { get; set; }
+    public int EnabledTagsCount { get; set; }
 }

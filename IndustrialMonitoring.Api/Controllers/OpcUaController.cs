@@ -49,4 +49,25 @@ public class OpcUaController : ControllerBase
         _opcUaDiscoveryService.UpdateTagsEnabledStateBySection(id, request.IsEnabled);
         return NoContent();
     }
+
+    [HttpPost("sections/sync")]
+    public async Task<ActionResult<DiscoveredSectionSyncResultDto>> SyncDiscoveredSections()
+    {
+        var result = await _opcUaDiscoveryService.SyncDiscoveredSectionsAsync();
+        return Ok(result);
+    }
+
+    [HttpPost("sections/{id:int}/tags/sync")]
+    public async Task<ActionResult<DiscoveredTagSyncResultDto>> SyncDiscoveredTagsForSection(int id)
+    {
+        var result = await _opcUaDiscoveryService.SyncDiscoveredTagsForSectionAsync(id);
+        return Ok(result);
+    }
+
+    [HttpGet("enabled-tags")]
+    public IActionResult GetEnabledTags()
+    {
+        var result = _opcUaDiscoveryService.GetEnabledTags();
+        return Ok(result);
+    }
 }

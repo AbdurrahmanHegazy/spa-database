@@ -11,4 +11,6 @@ public interface IOpcUaClient
     Task SearchAsync(string searchText, CancellationToken cancellationToken);
     Task BrowseNodeAsync(string nodeIdText, CancellationToken cancellationToken);
 
+    Task<DiscoveredOpcUaProject?> DiscoverProjectAsync(string rootNodeId, CancellationToken cancellationToken);
+
 }

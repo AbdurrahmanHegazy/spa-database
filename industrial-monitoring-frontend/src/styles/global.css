@@ -200,20 +200,27 @@ body {
 .dashboard-page {
 	display: flex;
 	flex-direction: column;
-	gap: 24px;
+	gap: 28px;
 }
 
 .dashboard-kpis {
 	display: grid;
 	grid-template-columns: repeat(4, minmax(0, 1fr));
-	gap: 18px;
+	gap: 20px;
 }
 
-.dashboard-status-grid,
+.dashboard-status-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 24px;
+	align-items: stretch;
+}
+
 .dashboard-bottom-grid {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 18px;
+	grid-template-columns: 1fr;
+	gap: 24px;
+	align-items: start;
 }
 
 .dashboard-card {
@@ -223,6 +230,76 @@ body {
 	box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
 }
 
+.dashboard-top-tags-panel,
+.dashboard-trend-panel {
+	min-width: 0;
+}
+
+.dashboard-status-grid > * {
+	height: 100%;
+}
+
+.dashboard-status-grid .alert-list,
+.dashboard-top-tags-panel .tag-preview-list {
+	min-height: 250px;
+	max-height: 250px;
+	overflow-y: auto;
+	padding-right: 6px;
+}
+
+.dashboard-trend-panel .panel-placeholder {
+	min-height: 250px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/* Dashboard scrollbars */
+.dashboard-status-grid .alert-list::-webkit-scrollbar,
+.dashboard-top-tags-panel .tag-preview-list::-webkit-scrollbar {
+	width: 10px;
+}
+
+.dashboard-status-grid .alert-list::-webkit-scrollbar-track,
+.dashboard-top-tags-panel .tag-preview-list::-webkit-scrollbar-track {
+	background: rgba(15, 23, 42, 0.65);
+	border-radius: 999px;
+}
+
+.dashboard-status-grid .alert-list::-webkit-scrollbar-thumb,
+.dashboard-top-tags-panel .tag-preview-list::-webkit-scrollbar-thumb {
+	background: rgba(59, 130, 246, 0.35);
+	border-radius: 999px;
+	border: 2px solid rgba(15, 23, 42, 0.65);
+}
+
+.dashboard-status-grid .alert-list::-webkit-scrollbar-thumb:hover,
+.dashboard-top-tags-panel .tag-preview-list::-webkit-scrollbar-thumb:hover {
+	background: rgba(59, 130, 246, 0.55);
+}
+
+/* Firefox */
+.dashboard-status-grid .alert-list,
+.dashboard-top-tags-panel .tag-preview-list {
+	scrollbar-width: thin;
+	scrollbar-color: rgba(59, 130, 246, 0.45) rgba(15, 23, 42, 0.65);
+}
+
+@media (max-width: 1100px) {
+	.dashboard-status-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.dashboard-kpis {
+		grid-template-columns: 1fr 1fr;
+	}
+}
+
+@media (max-width: 700px) {
+	.dashboard-kpis {
+		grid-template-columns: 1fr;
+	}
+}
 .kpi-card {
 	padding: 20px;
 	display: flex;

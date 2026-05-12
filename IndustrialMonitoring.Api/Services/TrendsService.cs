@@ -1,8 +1,8 @@
 ﻿using System.Globalization;
+using IndustrialMonitoring.Api.Helpers;
 using IndustrialMonitoring.Api.Models.Trends;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
-using IndustrialMonitoring.Api.Helpers;
 
 namespace IndustrialMonitoring.Api.Services;
 
@@ -16,42 +16,45 @@ public class TrendsService : ITrendsService
             configuration.GetConnectionString("Postgres")
             ?? throw new InvalidOperationException("ConnectionStrings:Postgres is missing.");
     }
-    private static string NormalizeTagId(string? tagId)
-    {
-        const string defaultTag = "ns=3;s=\"Sensori analogici\".\"IM_valore_CH4_sp1\".\"valore attuale\"";
 
+    private static string ResolveSelectedTag(string? tagId)
+    {
         if (string.IsNullOrWhiteSpace(tagId))
         {
-            return defaultTag;
+            return string.Empty;
         }
 
-        if (tagId.StartsWith("ns=", StringComparison.OrdinalIgnoreCase))
-        {
-            return tagId;
-        }
-
-        var cleaned = tagId.Trim();
-
-        if (cleaned.Equals("IM_valore_CH4_sp1.valore attuale", StringComparison.OrdinalIgnoreCase) ||
-            cleaned.Equals("IM_valore_CH4_sp1 - valore attuale", StringComparison.OrdinalIgnoreCase))
-        {
-            return "ns=3;s=\"Sensori analogici\".\"IM_valore_CH4_sp1\".\"valore attuale\"";
-        }
-
-        if (cleaned.Equals("IM_valore_CH4_sp1.stato attuale", StringComparison.OrdinalIgnoreCase) ||
-            cleaned.Equals("IM_valore_CH4_sp1 - stato attuale", StringComparison.OrdinalIgnoreCase))
-        {
-            return "ns=3;s=\"Sensori analogici\".\"IM_valore_CH4_sp1\".\"stato attuale\"";
-        }
-
-        return cleaned;
+        return tagId.Trim();
     }
 
     public TrendsResponse GetTrendsData(string? tagId, string? from, string? to, string? timeRange)
     {
-        var selectedTag = NormalizeTagId(tagId);
+        var selectedTag = ResolveSelectedTag(tagId);
 
         var (resolvedFrom, resolvedTo, resolvedTimeRange) = ResolveTimeWindow(from, to, timeRange);
+
+        if (string.IsNullOrWhiteSpace(selectedTag))
+        {
+            return new TrendsResponse
+            {
+                Filters = new TrendFiltersDto
+                {
+                    SelectedTag = string.Empty,
+                    TimeRange = resolvedTimeRange,
+                    From = TimeZoneHelper.UtcToRome(resolvedFrom).ToString("yyyy-MM-dd HH:mm"),
+                    To = TimeZoneHelper.UtcToRome(resolvedTo).ToString("yyyy-MM-dd HH:mm")
+                },
+                Stats = new List<TrendStatItemDto>
+                {
+                    new() { Title = "Minimum", Value = "0", Subtitle = "value" },
+                    new() { Title = "Maximum", Value = "0", Subtitle = "value" },
+                    new() { Title = "Average", Value = "0", Subtitle = "value" },
+                    new() { Title = "Samples", Value = "0", Subtitle = "points" }
+                },
+                SampleRows = new List<TrendSampleRowDto>(),
+                ChartPoints = new List<TrendPointDto>()
+            };
+        }
 
         var rows = LoadTrendRows(selectedTag, resolvedFrom, resolvedTo);
 
@@ -74,10 +77,30 @@ public class TrendsService : ITrendsService
             },
             Stats = new List<TrendStatItemDto>
             {
-                new() { Title = "Minimum", Value = min.ToString("0.##", CultureInfo.InvariantCulture), Subtitle = "value" },
-                new() { Title = "Maximum", Value = max.ToString("0.##", CultureInfo.InvariantCulture), Subtitle = "value" },
-                new() { Title = "Average", Value = avg.ToString("0.##", CultureInfo.InvariantCulture), Subtitle = "value" },
-                new() { Title = "Samples", Value = numericRows.Count.ToString("N0", CultureInfo.InvariantCulture), Subtitle = "points" }
+                new()
+                {
+                    Title = "Minimum",
+                    Value = min.ToString("0.##", CultureInfo.InvariantCulture),
+                    Subtitle = "value"
+                },
+                new()
+                {
+                    Title = "Maximum",
+                    Value = max.ToString("0.##", CultureInfo.InvariantCulture),
+                    Subtitle = "value"
+                },
+                new()
+                {
+                    Title = "Average",
+                    Value = avg.ToString("0.##", CultureInfo.InvariantCulture),
+                    Subtitle = "value"
+                },
+                new()
+                {
+                    Title = "Samples",
+                    Value = numericRows.Count.ToString("N0", CultureInfo.InvariantCulture),
+                    Subtitle = "points"
+                }
             },
             SampleRows = numericRows
                 .TakeLast(10)
@@ -119,6 +142,7 @@ public class TrendsService : ITrendsService
         command.Parameters.AddWithValue("toUtc", toUtc);
 
         using var reader = command.ExecuteReader();
+
         while (reader.Read())
         {
             var rawValue = reader["value"]?.ToString() ?? string.Empty;
@@ -135,8 +159,8 @@ public class TrendsService : ITrendsService
                 RawValue = rawValue,
                 NumericValue = numericValue,
                 Timestamp = DateTime.SpecifyKind(
-    reader.GetDateTime(reader.GetOrdinal("timestamp")),
-    DateTimeKind.Utc),
+                    reader.GetDateTime(reader.GetOrdinal("timestamp")),
+                    DateTimeKind.Utc),
                 Quality = reader["quality"]?.ToString() ?? string.Empty,
                 Source = reader["source"]?.ToString() ?? string.Empty
             });

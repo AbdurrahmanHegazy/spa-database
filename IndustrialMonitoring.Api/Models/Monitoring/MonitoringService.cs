@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using IndustrialMonitoring.Api.Models.Monitoring;
+using Npgsql;
 using StackExchange.Redis;
 
 namespace IndustrialMonitoring.Api.Services;
@@ -8,17 +9,22 @@ public class MonitoringService : IMonitoringService
 {
     private readonly IConnectionMultiplexer _redisConnection;
     private readonly IDatabase _redis;
+    private readonly string _connectionString;
     private const string RedisKeyPrefix = "industrial:latest:";
 
-    public MonitoringService(IConnectionMultiplexer redis)
+    public MonitoringService(IConnectionMultiplexer redis, IConfiguration configuration)
     {
         _redisConnection = redis;
         _redis = redis.GetDatabase();
+        _connectionString =
+            configuration.GetConnectionString("Postgres")
+            ?? throw new InvalidOperationException("ConnectionStrings:Postgres is missing.");
     }
 
     public MonitoringResponse GetMonitoringData()
     {
-        var latestReadings = GetLatestReadingsFromRedis();
+        var enabledNodeIds = GetEnabledTagNodeIdsFromDatabase();
+        var latestReadings = GetLatestReadingsFromRedis(enabledNodeIds);
 
         var healthySignals = latestReadings.Count(x =>
             string.Equals(x.Quality, "Good", StringComparison.OrdinalIgnoreCase));
@@ -36,25 +42,25 @@ public class MonitoringService : IMonitoringService
                 {
                     Title = "Streaming Tags",
                     Value = latestReadings.Count.ToString(),
-                    Subtitle = "Currently active live points"
+                    Subtitle = "Enabled live points"
                 },
                 new()
                 {
                     Title = "Healthy Signals",
                     Value = healthySignals.ToString(),
-                    Subtitle = "Good quality values"
+                    Subtitle = "Good quality enabled values"
                 },
                 new()
                 {
                     Title = "Warning Signals",
                     Value = warningSignals.ToString(),
-                    Subtitle = "Need attention"
+                    Subtitle = "Enabled tags needing attention"
                 },
                 new()
                 {
-                    Title = "Offline Devices",
+                    Title = "Offline Tags",
                     Value = offlineDevices.ToString(),
-                    Subtitle = "No recent updates"
+                    Subtitle = "Enabled tags with no recent updates"
                 }
             },
 
@@ -74,9 +80,41 @@ public class MonitoringService : IMonitoringService
         };
     }
 
-    private List<TagRedisReading> GetLatestReadingsFromRedis()
+    private HashSet<string> GetEnabledTagNodeIdsFromDatabase()
+    {
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        using var connection = new NpgsqlConnection(_connectionString);
+        connection.Open();
+
+        const string sql = """
+            SELECT t.node_id
+            FROM public.opcua_tags t
+            INNER JOIN public.opcua_sections s
+                ON s.id = t.section_id
+            WHERE t.is_enabled = TRUE;
+            """;
+
+        using var cmd = new NpgsqlCommand(sql, connection);
+        using var reader = cmd.ExecuteReader();
+
+        while (reader.Read())
+        {
+            var nodeId = reader.GetString(reader.GetOrdinal("node_id"));
+            results.Add(nodeId);
+        }
+
+        return results;
+    }
+
+    private List<TagRedisReading> GetLatestReadingsFromRedis(HashSet<string> enabledNodeIds)
     {
         var results = new List<TagRedisReading>();
+
+        if (enabledNodeIds.Count == 0)
+        {
+            return results;
+        }
 
         var endpoints = _redisConnection.GetEndPoints();
         if (endpoints.Length == 0)
@@ -109,10 +147,17 @@ public class MonitoringService : IMonitoringService
                     PropertyNameCaseInsensitive = true
                 });
 
-            if (reading is not null)
+            if (reading is null)
             {
-                results.Add(reading);
+                continue;
             }
+
+            if (!enabledNodeIds.Contains(reading.TagName))
+            {
+                continue;
+            }
+
+            results.Add(reading);
         }
 
         return results;

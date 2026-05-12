@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using IndustrialMonitoring.Api.Models.Dashboard;
+using Npgsql;
 using StackExchange.Redis;
 
 namespace IndustrialMonitoring.Api.Services;
@@ -8,20 +9,27 @@ public class DashboardService : IDashboardService
 {
     private readonly IConnectionMultiplexer _redisConnection;
     private readonly IDatabase _redis;
+    private readonly string _connectionString;
     private const string RedisKeyPrefix = "industrial:latest:";
 
-    public DashboardService(IConnectionMultiplexer redis)
+    public DashboardService(IConnectionMultiplexer redis, IConfiguration configuration)
     {
         _redisConnection = redis;
         _redis = redis.GetDatabase();
+        _connectionString =
+            configuration.GetConnectionString("Postgres")
+            ?? throw new InvalidOperationException("ConnectionStrings:Postgres is missing.");
     }
 
     public DashboardResponse GetDashboardSummary()
     {
-        var latestReadings = GetLatestReadingsFromRedis();
+        var enabledNodeIds = GetEnabledTagNodeIdsFromDatabase();
+        var latestReadings = GetLatestReadingsFromRedis(enabledNodeIds);
 
         var liveTagsCount = latestReadings.Count;
-        var activeAlertsCount = latestReadings.Count(x => !string.Equals(x.Quality, "Good", StringComparison.OrdinalIgnoreCase));
+        var activeAlertsCount = latestReadings.Count(x =>
+            !string.Equals(x.Quality, "Good", StringComparison.OrdinalIgnoreCase));
+
         var connectedDevicesCount = latestReadings
             .Select(x => ExtractGroupName(x.TagName))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -45,49 +53,25 @@ public class DashboardService : IDashboardService
                 {
                     Title = "Connected Devices",
                     Value = connectedDevicesCount.ToString(),
-                    Subtitle = "Live monitored assets"
+                    Subtitle = "Enabled live monitored groups"
                 },
                 new()
                 {
                     Title = "Live Tags",
                     Value = liveTagsCount.ToString(),
-                    Subtitle = "Streaming in real time"
+                    Subtitle = "Enabled tags streaming in real time"
                 },
                 new()
                 {
                     Title = "Active Alerts",
                     Value = activeAlertsCount.ToString(),
-                    Subtitle = "Require operator attention"
+                    Subtitle = "Enabled tags requiring attention"
                 },
                 new()
                 {
                     Title = "Data Flow",
                     Value = liveTagsCount > 0 ? "OK" : "NO DATA",
-                    Subtitle = "MQTT, Redis and API status"
-                }
-            },
-
-            SystemCards = new List<SystemCardDto>
-            {
-                new()
-                {
-                    Label = "Collector Service",
-                    Status = liveTagsCount > 0 ? "Online" : "Unknown"
-                },
-                new()
-                {
-                    Label = "MQTT Broker",
-                    Status = liveTagsCount > 0 ? "Online" : "Unknown"
-                },
-                new()
-                {
-                    Label = "TimescaleDB",
-                    Status = liveTagsCount > 0 ? "Online" : "Unknown"
-                },
-                new()
-                {
-                    Label = "Redis Cache",
-                    Status = liveTagsCount > 0 ? "Online" : "Offline"
+                    Subtitle = "Enabled live data available"
                 }
             },
 
@@ -96,7 +80,7 @@ public class DashboardService : IDashboardService
                 .Take(5)
                 .Select(x => new RecentAlertDto
                 {
-                    Title = $"Tag quality issue: {x.TagName}",
+                    Title = $"Tag quality issue: {FormatTagDisplayName(x.TagName)}",
                     Source = x.Source
                 })
                 .ToList(),
@@ -104,26 +88,40 @@ public class DashboardService : IDashboardService
             TopTags = topTags
         };
     }
-    private static string FormatTagDisplayName(string tagName)
+
+    private HashSet<string> GetEnabledTagNodeIdsFromDatabase()
     {
-        var quotedParts = GetQuotedParts(tagName);
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        if (quotedParts.Count >= 2)
+        using var connection = new NpgsqlConnection(_connectionString);
+        connection.Open();
+
+        const string sql = """
+            SELECT t.node_id
+            FROM public.opcua_tags t
+            WHERE t.is_enabled = TRUE;
+            """;
+
+        using var cmd = new NpgsqlCommand(sql, connection);
+        using var reader = cmd.ExecuteReader();
+
+        while (reader.Read())
         {
-            return $"{quotedParts[1]} - {quotedParts[^1]}";
+            var nodeId = reader.GetString(reader.GetOrdinal("node_id"));
+            results.Add(nodeId);
         }
 
-        if (quotedParts.Count == 1)
-        {
-            return quotedParts[0];
-        }
-
-        return tagName;
+        return results;
     }
 
-    private List<TagRedisReading> GetLatestReadingsFromRedis()
+    private List<TagRedisReading> GetLatestReadingsFromRedis(HashSet<string> enabledNodeIds)
     {
         var results = new List<TagRedisReading>();
+
+        if (enabledNodeIds.Count == 0)
+        {
+            return results;
+        }
 
         var endpoints = _redisConnection.GetEndPoints();
         if (endpoints.Length == 0)
@@ -156,15 +154,39 @@ public class DashboardService : IDashboardService
                     PropertyNameCaseInsensitive = true
                 });
 
-            if (reading is not null)
+            if (reading is null)
             {
-                results.Add(reading);
+                continue;
             }
+
+            if (!enabledNodeIds.Contains(reading.TagName))
+            {
+                continue;
+            }
+
+            results.Add(reading);
         }
 
         return results
             .OrderBy(x => x.TagName)
             .ToList();
+    }
+
+    private static string FormatTagDisplayName(string tagName)
+    {
+        var quotedParts = GetQuotedParts(tagName);
+
+        if (quotedParts.Count >= 2)
+        {
+            return $"{quotedParts[1]} - {quotedParts[^1]}";
+        }
+
+        if (quotedParts.Count == 1)
+        {
+            return quotedParts[0];
+        }
+
+        return tagName;
     }
 
     private static string BuildTagId(string tagName)
@@ -182,12 +204,7 @@ public class DashboardService : IDashboardService
     {
         var quotedParts = GetQuotedParts(tagName);
 
-        if (quotedParts.Count >= 2)
-        {
-            return quotedParts[1];
-        }
-
-        if (quotedParts.Count == 1)
+        if (quotedParts.Count >= 1)
         {
             return quotedParts[0];
         }

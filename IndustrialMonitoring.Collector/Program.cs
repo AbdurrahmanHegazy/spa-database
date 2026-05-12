@@ -17,6 +17,7 @@ builder.Services.AddSingleton<IMqttPublisherService, MqttPublisherService>();
 
 builder.Services.AddHostedService<OpcUaDiscoveryWorker>();
 builder.Services.AddHostedService<CollectorWorker>();
+builder.Services.AddSingleton<OpcUaHierarchyPersistenceService>();
 
 var host = builder.Build();
 host.Run();

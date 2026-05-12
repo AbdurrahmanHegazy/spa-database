@@ -1,62 +1,52 @@
-const API_BASE_URL = "http://localhost:5090/api/opcua";
+import axios from "axios";
+import { apiGet } from "./apiClient";
+
+const API_BASE_URL = "https://localhost:7105/api/opcua";
 
 export async function getOpcUaSections() {
-  const response = await fetch(`${API_BASE_URL}/sections`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to load OPC UA sections. Status: ${response.status}`);
-  }
-
-  return await response.json();
+  const response = await axios.get(`${API_BASE_URL}/sections`);
+  return response.data;
 }
 
 export async function getOpcUaTagsBySectionId(sectionId) {
-  const response = await fetch(`${API_BASE_URL}/sections/${sectionId}/tags`);
+  const response = await axios.get(`${API_BASE_URL}/sections/${sectionId}/tags`);
+  return response.data;
+}
 
-  if (!response.ok) {
-    throw new Error(`Failed to load OPC UA tags. Status: ${response.status}`);
-  }
+export async function syncDiscoveredSections() {
+  const response = await axios.post(`${API_BASE_URL}/sections/sync`);
+  return response.data;
+}
 
-  return await response.json();
+export async function syncDiscoveredTagsForSection(sectionId) {
+  const response = await axios.post(`${API_BASE_URL}/sections/${sectionId}/tags/sync`);
+  return response.data;
 }
 
 export async function updateSectionEnabledState(sectionId, isEnabled) {
-  const response = await fetch(`${API_BASE_URL}/sections/${sectionId}/enabled`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ isEnabled }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to update section state. Status: ${response.status}`);
-  }
-}
-export async function updateTagsEnabledStateBySection(sectionId, isEnabled) {
-  const response = await fetch(`http://localhost:5090/api/opcua/sections/${sectionId}/tags/enabled`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ isEnabled }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to update section tags state. Status: ${response.status}`);
-  }
+  const response = await axios.put(
+    `${API_BASE_URL}/sections/${sectionId}/enabled`,
+    { isEnabled }
+  );
+  return response.data;
 }
 
 export async function updateTagEnabledState(tagId, isEnabled) {
-  const response = await fetch(`${API_BASE_URL}/tags/${tagId}/enabled`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ isEnabled }),
-  });
+  const response = await axios.put(
+    `${API_BASE_URL}/tags/${tagId}/enabled`,
+    { isEnabled }
+  );
+  return response.data;
+}
 
-  if (!response.ok) {
-    throw new Error(`Failed to update tag state. Status: ${response.status}`);
-  }
+export async function updateTagsEnabledStateBySection(sectionId, isEnabled) {
+  const response = await axios.put(
+    `${API_BASE_URL}/sections/${sectionId}/tags/enabled`,
+    { isEnabled }
+  );
+  return response.data;
+}
+
+export async function getEnabledOpcUaTags() {
+    return apiGet("/opcua/enabled-tags");
 }
